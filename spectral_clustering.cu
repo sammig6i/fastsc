@@ -1,5 +1,4 @@
 #include <iostream>
-#include "rsymsol.h"
 #include "arrssym.h"
 #include <fstream>
 #include <cstdlib>
@@ -15,24 +14,53 @@
 
 using namespace std;
 
-int CUDA_MULT(float *x, float *y, cusparseHandle_t& handle, cusparseStatus_t& status, cusparseMatDescr_t& descr, int n, int nnz, thrust::device_vector<int>& csrRowPtr, thrust::device_vector<int>& cooColIndex, thrust::device_vector<float>& cooVal, thrust::device_vector<float>& tmpx, thrust::device_vector<float>& tmpy){
+int CUDA_MULT(float *x, float *y, cusparseHandle_t& handle, int n, int nnz, thrust::device_vector<int>& csrRowPtr, thrust::device_vector<int>& cooColIndex, thrust::device_vector<float>& cooVal, thrust::device_vector<float>& tmpx, thrust::device_vector<float>& tmpy){
+
 	float fone = 1.0;
 	float fzero = 0.0;
-	cudaMemcpy(thrust::raw_pointer_cast(tmpx.data()), x, n*sizeof(float), cudaMemcpyHostToDevice);
-	status = cusparseScsrmv(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, 
-			n, n, nnz, &fone, 
-			descr, 
-			thrust::raw_pointer_cast(cooVal.data()), 
-			thrust::raw_pointer_cast(csrRowPtr.data()) , thrust::raw_pointer_cast(cooColIndex.data()),
-			thrust::raw_pointer_cast(tmpx.data()), &fzero, 
-			thrust::raw_pointer_cast(tmpy.data()));
-	if (status != CUSPARSE_STATUS_SUCCESS) {
-		printf("cusparseScsrmv Failed");
-		return 1;
-	}
-	cudaMemcpy(y, thrust::raw_pointer_cast(tmpy.data()), n*sizeof(float), cudaMemcpyDeviceToHost);
-	return 0;
 
+	cusparseSpMatDescr_t matA;
+	cusparseCreateCsr(&matA, n, n, nnz,
+										thrust::raw_pointer_cast(csrRowPtr.data()),
+										thrust::raw_pointer_cast(cooColIndex.data()),
+										thrust::raw_pointer_cast(cooVal.data()),
+										CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
+										CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F);
+
+	
+	cusparseDnVecDescr_t vecX, vecY;
+	cusparseCreateDnVec(&vecX, n, thrust::raw_pointer_cast(tmpx.data()), CUDA_R_32F);
+	cusparseCreateDnVec(&vecY, n, thrust::raw_pointer_cast(tmpy.data()), CUDA_R_32F);
+
+    // Allocate buffer size for SpMV
+	size_t bufferSize = 0;
+	cusparseSpMV_bufferSize(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                            &fone, matA, vecX, &fzero, vecY, CUDA_R_32F,
+                            CUSPARSE_SPMV_ALG_DEFAULT, &bufferSize);
+    
+	void* dBuffer = NULL;
+	cudaMalloc(&dBuffer, bufferSize);
+
+    // Perform SpMV
+	cusparseStatus_t status = cusparseSpMV(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                           &fone, matA, vecX, &fzero, vecY, CUDA_R_32F,
+                                           CUSPARSE_SPMV_ALG_DEFAULT, dBuffer);
+
+	if (status != CUSPARSE_STATUS_SUCCESS) {
+			printf("cusparseSpMV Failed");
+			return 1;
+	}
+
+    // Copy result back to host
+	cudaMemcpy(y, thrust::raw_pointer_cast(tmpy.data()), n * sizeof(float), cudaMemcpyDeviceToHost);
+
+    // Clean up
+	cusparseDestroySpMat(matA);
+	cusparseDestroyDnVec(vecX);
+	cusparseDestroyDnVec(vecY);
+	cudaFree(dBuffer);
+
+	return 0;
 }
 
 
@@ -159,7 +187,7 @@ int main(int argc, char* argv[]) {
 	while (!prob.ArnoldiBasisFound()) {
 		prob.TakeStep();
 		if ((prob.GetIdo() == 1)||(prob.GetIdo() == -1)) {
-			CUDA_MULT(prob.GetVector(), prob.PutVector(), handle, status, descr, n, nnz, csrRowPtr, cooColIndex, cooVal, tmpx, tmpy);
+			CUDA_MULT(prob.GetVector(), prob.PutVector(), handle, n, nnz, csrRowPtr, cooColIndex, cooVal, tmpx, tmpy);
 		}
 	}
 
