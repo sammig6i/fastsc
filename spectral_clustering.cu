@@ -142,8 +142,16 @@ int main(int argc, char* argv[]) {
 	for(int i = 0; i < n; ++i) {
 		if (degree[i] < 1e-8) {
 			cout<<"Node " <<i<<" is an isolated node"<<endl;
-			cout<<"Please eliminate isolated nodes and try again!"<<endl;
-			exit(1);
+			int random_node = rand() % n;
+			while (random_node == i || degree[random_node] < 1e-8) {
+				random_node = rand() % n;
+			}
+			cout << "Connecting isolated node " << i << " to node " << random_node << " with minimal edge weight." <<endl;
+			degree[i] = 0.01;
+			degree[random_node] += 0.01;
+			row.push_back(i);
+			col.push_back(random_node);
+			val.push_back(0.01);
 		}
 	}
 	thrust::host_vector<float> degree_sqrt(n);
