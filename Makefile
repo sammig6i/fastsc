@@ -1,5 +1,5 @@
 CUDA_CPP = nvcc
-CUDA_ARCH ?= sm_75
+CUDA_ARCH ?= sm_86
 include /teamspace/studios/this_studio/arpackpp/Makefile.inc
 CUDA_FLAGS = -arch=$(CUDA_ARCH) -Xptxas -v
 CUDA_LIBS = -lcublas -lcusparse
